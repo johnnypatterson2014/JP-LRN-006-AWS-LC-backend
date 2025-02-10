@@ -4,6 +4,14 @@ python -m venv .venv
 .venv\Scripts\activate
 pip install -r requirements.txt
 
+pip install langchain==0.1.6
+pip install langchain-community==0.0.19
+pip install langchain-core==0.1.23
+
+pip install faiss-cpu
+
+pip freeze > requirements.txt
+
 run backend app:
 uvicorn main:app --reload
 

@@ -6,6 +6,17 @@ import crud
 from database import SessionLocal
 from uuid import uuid4
 
+from langchain import OpenAI, PromptTemplate
+from langchain.chains import LLMChain
+
+from langchain.document_loaders import PyPDFLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain.embeddings.openai import OpenAIEmbeddings
+from langchain.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+from schemas import QuestionRequest
+llm = OpenAI()
+
 router = APIRouter(prefix="/pdfs")
 
 def get_db():
@@ -48,3 +59,42 @@ def delete_pdf(id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="PDF not found")
     return {"message": "PDF successfully deleted"}
 
+# LANGCHAIN
+langchain_llm = OpenAI(temperature=0)
+
+summarize_template_string = """
+        Provide a summary for the following text:
+        {text}
+"""
+
+summarize_prompt = PromptTemplate(
+    template=summarize_template_string,
+    input_variables=['text'],
+)
+
+summarize_chain = LLMChain(
+    llm=langchain_llm,
+    prompt=summarize_prompt,
+)
+
+@router.post('/summarize-text')
+async def summarize_text(text: str):
+    summary = summarize_chain.run(text=text)
+    return {'summary': summary}
+
+@router.post("/qa-pdf/{id}")
+def qa_pdf_by_id(id: int, question_request: QuestionRequest,db: Session = Depends(get_db)):
+    pdf = crud.read_pdf(db, id)
+    if pdf is None:
+        raise HTTPException(status_code=404, detail="PDF not found")
+    print(pdf.file)
+    loader = PyPDFLoader(pdf.file)
+    document = loader.load()
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=3000,chunk_overlap=400)
+    document_chunks = text_splitter.split_documents(document)
+    embeddings = OpenAIEmbeddings()
+    stored_embeddings = FAISS.from_documents(document_chunks, embeddings)
+    QA_chain = RetrievalQA.from_chain_type(llm=llm,chain_type="stuff",retriever=stored_embeddings.as_retriever())
+    question = question_request.question
+    answer = QA_chain.run(question)
+    return answer
